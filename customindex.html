@@ -1,0 +1,625 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Luau Editor — Thick Tabs, Autosave, Transparent</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    :root{
+      --toolbar-height:52px;
+      --bg-transparent: #00000000;
+      --panel-bg: rgba(0,0,0,0.18);
+      --tab-bg: #2b2b2b;
+      --tab-hover: #333333;
+      --tab-active: #1f1f1f;
+      --accent: #4ec9b0;
+      --text: #e6e6e6;
+      --muted: #9a9a9a;
+      --save-toast-bg: rgba(40,40,40,0.86);
+      --notify-duration: 2200ms;
+      --tab-height: 36px; /* thicker tab */
+      --tab-border-radius: 8px; /* less rounded */
+    }
+
+    html,body{
+      height:100%;
+      margin:0;
+      padding:0;
+      background: var(--bg-transparent) !important;
+      color: var(--text);
+      font-family: "Segoe UI", Roboto, -apple-system, "Helvetica Neue", Arial, sans-serif;
+      -webkit-font-smoothing:antialiased;
+      overflow:hidden;
+    }
+
+    /* toolbar */
+    .toolbar{
+      height:var(--toolbar-height);
+      display:flex;
+      align-items:center;
+      padding:8px 12px;
+      gap:10px;
+      box-sizing:border-box;
+      background: var(--bg-transparent);
+      backdrop-filter: blur(6px);
+    }
+
+    .tabs{
+      display:flex;
+      gap:10px;
+      align-items:center;
+      overflow-x:auto;
+      padding-bottom:4px;
+    }
+
+    /* thicker rectangle-like tab */
+    .tab {
+      display:flex;
+      align-items:center;
+      gap:10px;
+      padding:6px 12px;
+      height: var(--tab-height);
+      border-radius: var(--tab-border-radius);
+      cursor:pointer;
+      user-select:none;
+      color:var(--text);
+      background: var(--tab-bg);
+      box-shadow: 0 6px 14px rgba(0,0,0,0.55);
+      transition: transform 120ms ease, background 120ms ease, box-shadow 120ms ease;
+      font-size:13px;
+      min-width: 100px;
+      max-width: 360px;
+      white-space:nowrap;
+      overflow:hidden;
+    }
+
+    .tab:hover{
+      transform: translateY(-2px);
+      background: var(--tab-hover);
+    }
+
+    .tab.active{
+      background: var(--tab-active);
+      font-weight:600;
+      transform: translateY(-3px);
+      box-shadow: 0 10px 30px rgba(0,0,0,0.7);
+    }
+
+    .tab .name{ 
+      overflow:hidden; 
+      text-overflow:ellipsis; 
+      white-space:nowrap;
+      display:block;
+    }
+
+    .tab .close{
+      width:20px;
+      height:20px;
+      display:inline-grid;
+      place-items:center;
+      border-radius:6px;
+      font-size:12px;
+      color:var(--muted);
+      background: rgba(0,0,0,0.12);
+    }
+    .tab .close:hover{ color:#fff; background: rgba(255,255,255,0.04); }
+
+    /* inline rename input */
+    .rename-input {
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.04);
+      color: var(--text);
+      font-size:13px;
+      padding:4px 8px;
+      border-radius:6px;
+      outline:none;
+      width: 160px;
+      box-sizing:border-box;
+    }
+
+    .addBtn{
+      padding:8px 12px;
+      border-radius:10px;
+      background: var(--tab-bg);
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      cursor:pointer;
+      font-weight:600;
+      box-shadow: 0 6px 14px rgba(0,0,0,0.55);
+      transition: transform 120ms ease, background 120ms ease;
+      height:var(--tab-height);
+    }
+    .addBtn:hover{ background: var(--tab-hover); transform: translateY(-2px); }
+
+    .toolbar-right{
+      margin-left:auto;
+      display:flex;
+      align-items:center;
+      gap:8px;
+    }
+
+    button.small{
+      height:34px;
+      padding:6px 10px;
+      border-radius:8px;
+      border:none;
+      background: rgba(255,255,255,0.03);
+      color:var(--text);
+      cursor:pointer;
+      font-size:13px;
+    }
+
+    #container{
+      position:absolute;
+      top:var(--toolbar-height);
+      left:0;
+      right:0;
+      bottom:0;
+      background: var(--bg-transparent) !important;
+    }
+
+    /* toasts */
+    .toast-wrap{
+      position: fixed;
+      top: 12px;
+      right: 12px;
+      display:flex;
+      flex-direction:column;
+      gap:8px;
+      z-index: 9999;
+      pointer-events: none;
+    }
+    .toast {
+      pointer-events: auto;
+      background: var(--save-toast-bg);
+      color: #fff;
+      padding: 8px 12px;
+      border-radius: 8px;
+      box-shadow: 0 8px 28px rgba(0,0,0,0.6);
+      font-size: 13px;
+      opacity: 0;
+      transform: translateY(-8px) scale(0.98);
+      transition: opacity 220ms ease, transform 220ms ease;
+      max-width: 320px;
+      overflow:hidden;
+      white-space:nowrap;
+      text-overflow:ellipsis;
+    }
+    .toast.show {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+
+    /* scrollbars smaller */
+    .tabs::-webkit-scrollbar{ height:8px; }
+    .tabs::-webkit-scrollbar-thumb{ background: rgba(255,255,255,0.04); border-radius:6px; }
+    .tabs::-webkit-scrollbar-track{ background: transparent; }
+
+    @media (max-width:520px){
+      .tab { padding:6px 10px; font-size:12px; min-width:80px; }
+      .addBtn { padding:6px 10px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="toolbar" role="toolbar" aria-label="Editor toolbar">
+    <div class="tabs" id="tabsBar" aria-hidden="false"></div>
+    <div class="addBtn" id="newTabBtn" title="New tab">＋</div>
+
+    <div class="toolbar-right">
+      <button id="saveAllBtn" class="small" title="Save all tabs">Save</button>
+    </div>
+  </div>
+
+  <div id="container"></div>
+
+  <div class="toast-wrap" id="toastWrap" aria-live="polite"></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.36.1/min/vs/loader.min.js"></script>
+  <script>
+    // -------------------- state --------------------
+    const STORAGE_KEY = 'luau_monaco_tabs_v3';
+    let tabs = [];
+    let activeTabId = null;
+    let editor = null;
+    let saveDebounce;
+    const tabsBar = document.getElementById('tabsBar');
+
+    // -------------------- utils --------------------
+    const uid = (n=8) => Math.random().toString(36).slice(2,2+n);
+    function nowMs(){ return Date.now(); }
+
+    // toast notifications (custom)
+    const toastWrap = document.getElementById('toastWrap');
+    function showToast(text, ttl = 1800){
+      const el = document.createElement('div');
+      el.className = 'toast';
+      el.textContent = text;
+      toastWrap.appendChild(el);
+      // force reflow then show
+      requestAnimationFrame(()=> el.classList.add('show'));
+      setTimeout(()=> {
+        el.classList.remove('show');
+        setTimeout(()=> el.remove(), 300);
+      }, ttl);
+    }
+
+    // normalize names to end with .lua
+    function normalizeTabName(name){
+      if(!name) name = 'untitled';
+      name = name.trim();
+      if(!/\.lua$/i.test(name)) name = name + '.lua';
+      return name;
+    }
+
+    // -------------------- storage --------------------
+    function persistTabsImmediate(){
+      try{
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({ tabs, activeTabId }));
+      }catch(e){ console.warn('save failed', e); }
+    }
+    function persistTabs(){
+      clearTimeout(saveDebounce);
+      saveDebounce = setTimeout(()=>{
+        persistTabsImmediate();
+        showToast('Autosaved');
+      }, 420); // autosave delay after edits
+    }
+    function loadTabsFromStorage(){
+      try{
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if(!raw) return false;
+        const parsed = JSON.parse(raw);
+        if(parsed && Array.isArray(parsed.tabs)){
+          tabs = parsed.tabs;
+          activeTabId = parsed.activeTabId || (tabs[0] && tabs[0].id) || null;
+          return true;
+        }
+      }catch(e){ console.warn('load failed', e); }
+      return false;
+    }
+
+    // -------------------- UI rendering --------------------
+    function renderTabs(){
+      tabsBar.innerHTML = '';
+      tabs.forEach(t=>{
+        const el = document.createElement('div');
+        el.className = 'tab' + (t.id === activeTabId ? ' active' : '');
+        el.dataset.id = t.id;
+
+        const name = document.createElement('div');
+        name.className = 'name';
+        name.textContent = t.name || 'untitled.lua';
+        el.appendChild(name);
+
+        const close = document.createElement('div');
+        close.className = 'close';
+        close.innerHTML = '✕';
+        el.appendChild(close);
+
+        // click activate (but ignore click on close)
+        el.addEventListener('click', (ev) => {
+          if(ev.target === close) return;
+          setActiveTab(t.id);
+        });
+
+        // close
+        close.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          closeTab(t.id);
+        });
+
+        // double click to rename: custom inline input
+        name.addEventListener('dblclick', (ev) => {
+          ev.stopPropagation();
+          openRenameInput(el, t);
+        });
+
+        tabsBar.appendChild(el);
+      });
+
+      // keep active visible
+      const activeEl = tabsBar.querySelector('.tab.active');
+      if(activeEl) activeEl.scrollIntoView({ inline: 'nearest', behavior: 'smooth' });
+    }
+
+    // inline rename input
+    function openRenameInput(tabEl, tabObj){
+      // if already an input, ignore
+      if(tabEl.querySelector('input.rename-input')) return;
+
+      const nameEl = tabEl.querySelector('.name');
+      const orig = tabObj.name || 'untitled.lua';
+      const base = orig.replace(/\.lua$/i,'');
+      nameEl.style.display = 'none';
+
+      const input = document.createElement('input');
+      input.className = 'rename-input';
+      input.value = base;
+      tabEl.insertBefore(input, nameEl);
+
+      input.focus();
+      input.setSelectionRange(0, input.value.length);
+
+      function commit(){
+        const val = input.value;
+        if(val === null) return close();
+        tabObj.name = normalizeTabName(val);
+        persistTabsImmediate();
+        renderTabs();
+        showToast('Renamed to ' + tabObj.name);
+      }
+      function close(){
+        input.remove();
+        nameEl.style.display = '';
+      }
+
+      input.addEventListener('keydown', (e) => {
+        if(e.key === 'Enter'){ commit(); }
+        else if(e.key === 'Escape'){ close(); }
+      });
+      input.addEventListener('blur', () => { commit(); });
+    }
+
+    // -------------------- tab operations --------------------
+    function createTab({ name='untitled', content='-- new file\n', language='luau', makeActive=true } = {}){
+      name = normalizeTabName(name);
+      const newTab = { id: uid(10), name, content, language, createdAt: nowMs() };
+      tabs.push(newTab);
+      if(makeActive) activeTabId = newTab.id;
+      renderTabs();
+      persistTabs(); // immediate autosave scheduled
+      loadActiveTabContent();
+      return newTab;
+    }
+
+    function setActiveTab(tabId){
+      if(activeTabId === tabId) return;
+      saveCurrentTabContent();
+      activeTabId = tabId;
+      renderTabs();
+      loadActiveTabContent();
+      persistTabs();
+    }
+
+    function closeTab(tabId){
+      const idx = tabs.findIndex(t => t.id === tabId);
+      if(idx === -1) return;
+      const wasActive = tabs[idx].id === activeTabId;
+      tabs.splice(idx, 1);
+      if(wasActive){
+        activeTabId = (tabs[idx] && tabs[idx].id) || (tabs[idx-1] && tabs[idx-1].id) || null;
+      }
+      renderTabs();
+      persistTabs();
+      loadActiveTabContent();
+    }
+
+    function saveCurrentTabContent(){
+      if(!editor || !activeTabId) return;
+      const t = tabs.find(x => x.id === activeTabId);
+      if(!t) return;
+      t.content = editor.getValue();
+      persistTabs();
+    }
+
+    function loadActiveTabContent(){
+      if(!editor) return;
+      const t = tabs.find(x => x.id === activeTabId);
+      if(!t){
+        const created = createTab({ name: 'main.lua', content: '-- New file\n', makeActive: true });
+        editor.setValue(created.content);
+        return;
+      }
+      monaco.editor.setModelLanguage(editor.getModel(), t.language || 'luau');
+      editor.setValue(t.content || '');
+      editor.focus();
+      setErrorMarkers();
+    }
+
+    // -------------------- public API --------------------
+    window.GetContent = function(){
+      if(!editor) return '';
+      saveCurrentTabContent();
+      return editor.getValue();
+    };
+    window.SetContent = function(text){
+      if(!editor) return;
+      editor.setValue(text || '');
+      const t = tabs.find(x => x.id === activeTabId);
+      if(t){ t.content = editor.getValue(); persistTabs(); }
+    };
+    window.GetTabList = function(){
+      return tabs.map(t => ({ id: t.id, name: t.name, language: t.language }));
+    };
+    window.SaveTabs = persistTabsImmediate;
+    window.OpenTab = function(name, content){
+      return createTab({ name: name || 'untitled.lua', content: content || '', makeActive: true });
+    };
+
+    // Minimap API (no HTML button)
+    window.ToggleMinimap = function(){
+      if(!editor) return false;
+      const cur = !!(editor.getRawOptions().minimap && editor.getRawOptions().minimap.enabled);
+      const next = !cur;
+      editor.updateOptions({ minimap: { enabled: next }});
+      showToast(next ? 'Minimap enabled' : 'Minimap disabled', 1200);
+      return next;
+    };
+    window.IsMinimapEnabled = function(){
+      if(!editor) return false;
+      return !!(editor.getRawOptions().minimap && editor.getRawOptions().minimap.enabled);
+    };
+
+    // -------------------- Monaco bootstrap --------------------
+    require.config({ paths: { vs: 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.36.1/min/vs' }});
+    require(['vs/editor/editor.main'], function(){
+      monaco.languages.register({ id: 'luau' });
+
+      monaco.languages.setMonarchTokensProvider('luau', {
+        defaultToken: '',
+        tokenPostfix: '.lua',
+        keywords: ['and','break','do','else','elseif','end','false','for','function','if','in','local','nil','not','or','repeat','return','then','true','until','while','continue','export','type','typeof'],
+        typeKeywords: ['any','boolean','number','string','table','void','never','unknown'],
+        builtinFunctions: ['assert','error','getmetatable','ipairs','next','pairs','pcall','print','rawequal','rawget','rawlen','rawset','require','select','setmetatable','tonumber','tostring','type','typeof','unpack','warn','xpcall'],
+        operators: ['+','-','*','/','%','^','#','==','~=','<=','>=','<','>','=',';',':',',','.','..','...','::'],
+        symbols: /[=><!~?:&|+\-*\/\^%]+/,
+        tokenizer: {
+          root: [
+            [/[a-zA-Z_]\w*/, {
+              cases: {
+                '@keywords': 'keyword',
+                '@typeKeywords': 'type',
+                '@builtinFunctions': 'support.function',
+                '@default': 'identifier'
+              }
+            }],
+            { include: '@whitespace' },
+            [/[{}()\[\]]/, '@brackets'],
+            [/@symbols/, 'operator'],
+            [/\d*\.\d+([eE][\-+]?\d+)?/, 'number.float'],
+            [/0[xX][0-9a-fA-F]+/, 'number.hex'],
+            [/\d+/, 'number'],
+            [/["][^"]*["]/, 'string'],
+            [/'[^']*'/, 'string'],
+            [/--.*/, 'comment']
+          ],
+          whitespace: [
+            [/[ \t\r\n]+/, 'white']
+          ]
+        }
+      });
+
+      // Define theme with transparent background
+      monaco.editor.defineTheme('luau-transparent', {
+        base: 'vs-dark',
+        inherit: true,
+        rules: [
+          { token: 'keyword', foreground: 'C586C0' },
+          { token: 'support.function', foreground: 'DCDCAA' },
+          { token: 'string', foreground: 'CE9178' },
+          { token: 'comment', foreground: '6A9955' },
+          { token: 'number', foreground: 'B5CEA8' }
+        ],
+        colors: {
+          'editor.background': '#00000000',
+          'editorLineNumber.foreground': '#6a6a6a',
+          'editorLineNumber.activeForeground': '#d0d0d0',
+          'editorCursor.foreground': '#A6A6A6',
+          'editor.selectionBackground': '#264F78AA',
+          'editor.inactiveSelectionBackground': '#3A3D41AA',
+          'editorLineHighlightBackground': '#0f0f0f33'
+        }
+      });
+
+      const editorOptions = {
+        value: '-- loading...',
+        language: 'luau',
+        theme: 'luau-transparent',
+        automaticLayout: true,
+        minimap: { enabled: true },
+        fontSize: 14,
+        lineNumbers: 'on',
+        roundedSelection: false,
+        scrollBeyondLastLine: false,
+        renderWhitespace: 'none',
+        quickSuggestions: { other: true, comments: false, strings: false },
+        suggestOnTriggerCharacters: true,
+        tabCompletion: 'on',
+        wordBasedSuggestions: true,
+        smoothScrolling: true,
+        mouseWheelZoom: true,
+        cursorBlinking: 'smooth',
+        cursorSmoothCaretAnimation: true,
+        fontLigatures: false,
+        formatOnType: false,
+        formatOnPaste: false,
+        parameterHints: { enabled: true, cycle: true },
+        hover: { enabled: true, delay: 300, sticky: true },
+        snippetSuggestions: 'inline',
+        // make editor container visually transparent
+        minimap: { enabled: true, showSlider: 'mouseover' }
+      };
+
+      editor = monaco.editor.create(document.getElementById('container'), editorOptions);
+
+      // ensure transparency
+      document.getElementById('container').style.background = 'transparent';
+      document.body.style.background = 'transparent';
+
+      // basic completion provider
+      monaco.languages.registerCompletionItemProvider('luau', {
+        triggerCharacters: ['.', ':', '(', ',', ' '],
+        provideCompletionItems: function(model, position) {
+          const suggestions = [
+            { label: 'local', kind: monaco.languages.CompletionItemKind.Keyword, insertText: 'local ${1:var} = ${2}', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet },
+            { label: 'function', kind: monaco.languages.CompletionItemKind.Keyword, insertText: 'function ${1:name}(${2})\\n\\t${3}\\nend', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet }
+          ];
+          return { suggestions };
+        }
+      });
+
+      // basic markers (simple)
+      function setErrorMarkers(){
+        if(!editor) return;
+        const model = editor.getModel();
+        const content = model.getValue();
+        const errors = [];
+        const lines = content.split('\\n');
+
+        lines.forEach((line, i)=>{
+          if(line.includes('TODO')) {
+            errors.push({
+              severity: monaco.MarkerSeverity.Info,
+              startLineNumber: i+1,
+              startColumn: 1,
+              endLineNumber: i+1,
+              endColumn: Math.max(2, line.length),
+              message: 'TODO found'
+            });
+          }
+        });
+
+        monaco.editor.setModelMarkers(editor.getModel(), 'owner', errors);
+      }
+
+      // model change => update saved tab content and autosave
+      let markerTimer;
+      editor.getModel().onDidChangeContent(()=>{
+        clearTimeout(markerTimer);
+        markerTimer = setTimeout(()=>{
+          setErrorMarkers();
+          const t = tabs.find(x => x.id === activeTabId);
+          if(t){ t.content = editor.getValue(); persistTabs(); }
+        }, 240);
+      });
+
+      // initialize
+      const loaded = loadTabsFromStorage();
+      if(!loaded || !tabs.length){
+        createTab({ name:'main.lua', content:[
+          '-- Luau example',
+          'local function add(a: number, b: number): number',
+          '    return a + b',
+          'end',
+          '',
+          'print(add(2,3))'
+        ].join('\\n'), makeActive:true});
+      } else {
+        renderTabs();
+        setTimeout(()=> loadActiveTabContent(), 60);
+      }
+
+      // toolbar controls (no minimap button - user requested minimap as function only)
+      document.getElementById('newTabBtn').addEventListener('click', ()=> createTab({ name:'untitled.lua', content:'-- new file\n', makeActive:true }));
+      document.getElementById('saveAllBtn').addEventListener('click', ()=> { saveCurrentTabContent(); persistTabsImmediate(); showToast('Saved'); });
+
+      // save on unload
+      window.addEventListener('beforeunload', ()=>{ saveCurrentTabContent(); persistTabsImmediate(); });
+
+      setTimeout(setErrorMarkers, 200);
+    });
+  </script>
+</body>
+</html>
